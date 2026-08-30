@@ -3,7 +3,7 @@
 import { db } from '@/db';
 import { files } from '@/db/schema';
 import { eq, isNull } from 'drizzle-orm';
-import { revalidatePath, revalidateTag } from 'next/cache';
+import { revalidatePath } from 'next/cache';
 import { v2 as cloudinary } from 'cloudinary';
 
 cloudinary.config({
@@ -22,7 +22,6 @@ export async function saveFileRecord(name: string, url: string, size: number, ty
   });
   
   revalidatePath('/dashboard');
-  revalidateTag('cloudinary-usage');
 }
 
 export async function getFiles(folderId: string | null = null) {
@@ -50,7 +49,6 @@ export async function deleteFile(id: string, url?: string) {
 
   await db.delete(files).where(eq(files.id, id));
   revalidatePath('/dashboard');
-  revalidateTag('cloudinary-usage');
   return { success: true };
 }
 
