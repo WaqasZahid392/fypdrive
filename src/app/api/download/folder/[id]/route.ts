@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { folders, files } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import JSZip from 'jszip';
+import { fetchCloudinaryAsset, getFullFilename } from '@/lib/download';
 
 export const maxDuration = 60; // Set a higher timeout for large zips
 
@@ -13,8 +14,8 @@ async function getFolderFilesRecursive(folderId: string, currentPath: string = '
   // Get all files in this folder
   const currentFiles = await db.select().from(files).where(eq(files.folderId, folderId));
   for (const f of currentFiles) {
-    const extension = f.name.includes('.') ? '' : `.${f.type}`;
-    result.push({ file: f, path: `${currentPath}${f.name}${extension}` });
+    const filename = getFullFilename(f.name, f.type);
+    result.push({ file: f, path: `${currentPath}${filename}` });
   }
 
   // Get all child folders
@@ -40,8 +41,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const allFiles = await getFolderFilesRecursive(id, '');
 
-    // If folder is empty, send an empty zip
-    // archiver can create an empty zip, but we can also just return a 400
+    // If folder is empty, send an empty zip or message
     if (allFiles.length === 0) {
       return new NextResponse('Folder is empty', { status: 400 });
     }
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Process files
     for (const { file, path } of allFiles) {
       try {
-        const response = await fetch(file.url);
+        const response = await fetchCloudinaryAsset(file.url, file.type);
         if (!response.ok || !response.body) {
           console.error(`Failed to fetch file: ${file.name}`);
           continue;
@@ -77,8 +77,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
 
     const headers = new Headers();
-    const filename = `${folder.name.replace(/"/g, '')}.zip`;
-    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    const folderName = folder.name.trim();
+    const safeFilename = `${folderName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '')}.zip`;
+    const encodedFilename = encodeURIComponent(`${folderName}.zip`);
+    headers.set('Content-Disposition', `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`);
     headers.set('Content-Type', 'application/zip');
 
     return new NextResponse(stream, { headers });

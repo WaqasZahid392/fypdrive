@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { files } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { fetchCloudinaryAsset, getFullFilename } from '@/lib/download';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,21 +16,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     
     const file = fileResult[0];
 
-    // Fetch the file from Cloudinary
-    const response = await fetch(file.url);
+    // Fetch the file from Cloudinary (with fallback for restricted assets like PDF)
+    const response = await fetchCloudinaryAsset(file.url, file.type);
     if (!response.ok) {
-      throw new Error(`Failed to fetch file from Cloudinary: ${response.statusText}`);
+      throw new Error(`Failed to fetch file from Cloudinary: ${response.status} ${response.statusText}`);
     }
 
-    // Ensure filename has an extension
-    const extension = file.name.includes('.') ? '' : `.${file.type}`;
-    const filename = `${file.name}${extension}`.replace(/"/g, '');
+    const filename = getFullFilename(file.name, file.type);
 
-    // Set headers to force download
+    // Set headers to force download with proper filename encoding
     const headers = new Headers();
-    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    const safeAsciiFilename = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    const encodedFilename = encodeURIComponent(filename);
+    headers.set('Content-Disposition', `attachment; filename="${safeAsciiFilename}"; filename*=UTF-8''${encodedFilename}`);
     headers.set('Content-Type', response.headers.get('Content-Type') || 'application/octet-stream');
-    headers.set('Content-Length', response.headers.get('Content-Length') || file.size.toString());
+    if (response.headers.get('Content-Length')) {
+      headers.set('Content-Length', response.headers.get('Content-Length')!);
+    }
 
     // Stream the file back to the client
     return new NextResponse(response.body, { headers });
